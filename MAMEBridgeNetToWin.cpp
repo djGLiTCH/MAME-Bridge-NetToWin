@@ -2,7 +2,7 @@
 // copyright-holders: Jacob Simpson
 
 // MAME Bridge NetToWin
-// Version 2.2.0
+// Version 2.3.0
 // Author: DJ GLiTCH
 // Designed to bridge the gap between network and windows output in MAME and enable simultaneous output.
 // MAME must be set to "output network". This tool will forward all state outputs from "network" to "windows" by simulating native "windows" output in MAME.
@@ -44,7 +44,7 @@
 
 // --- INFO STRINGS ---
 #define TOOL_NAME "MAME Bridge NetToWin"
-#define TOOL_VERSION "2.2.0"
+#define TOOL_VERSION "2.3.0"
 #define TOOL_AUTHOR "DJ GLiTCH"
 #define GITHUB_LINK "https://github.com/djGLiTCH/MAME-Bridge-NetToWin"
 
@@ -60,7 +60,7 @@ std::vector<HWND> g_clients;
 std::map<std::string, LPARAM> g_nameToID;
 std::map<LPARAM, std::string> g_idToName;
 LPARAM g_nextID = 1;
-std::string g_currentRomName = "MAME"; // Default to MAME until we get the start signal
+std::string g_currentRomName = "MAME"; // Default
 
 // WINDOWS MESSAGE IDs
 UINT om_mame_start;
@@ -113,9 +113,6 @@ LRESULT CALLBACK BridgeWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam
         HWND client = (HWND)wParam;
         g_clients.push_back(client);
         Log("[WIN] Client Registered!");
-        
-        // Handshake: Client sends us their ID, we acknowledge by sending all current states (if we had them)
-        // For now, simply accepting the registration is enough.
         return 1;
     }
     else if (msg == om_mame_unregister_client) {
@@ -141,7 +138,7 @@ LRESULT CALLBACK BridgeWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam
             name = g_idToName[id];
         }
 
-        // Prepare the COPYDATA struct exactly as MAME does
+        // Prepare COPYDATA
         struct copydata_id_string { uint32_t id; char string[1]; };
         int dataLen = sizeof(copydata_id_string) + name.length() + 1;
         
@@ -240,14 +237,13 @@ LRESULT CALLBACK GUIWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     return 0;
 }
 
-// --- PROCESS NETWORK LINE ---
+// --- LINE PROCESSOR ---
 void ProcessLine(std::string line) {
-    // Trim whitespace
-    while (!line.empty() && (line.back() == '\r' || line.back() == '\n' || line.back() == ' ')) 
-        line.pop_back();
-
+    // 1. Trim potential Windows CRLF (\r)
+    if (!line.empty() && line.back() == '\r') line.pop_back();
     if (line.empty()) return;
 
+    // 2. Parse "Key = Value"
     size_t eqPos = line.find("=");
     if (eqPos != std::string::npos) {
         std::string name = line.substr(0, eqPos);
@@ -259,7 +255,7 @@ void ProcessLine(std::string line) {
         while (!valStr.empty() && valStr.front() == ' ') valStr.erase(0, 1);
         
         // SPECIAL CASE: "mame_start"
-        // This tells us the ROM NAME. We must store this for ID 0.
+        // This MUST be caught to set the ROM Name for ID 0
         if (name == "mame_start") {
             g_currentRomName = valStr;
             Log("[SYS] MAME Started. ROM: " + g_currentRomName);
@@ -293,21 +289,20 @@ void NetworkThread() {
         if (connect(sock, (struct sockaddr*)&server, sizeof(server)) == 0) {
             Log("[NET] Connected to MAME!");
             
-            // NOTE: We do NOT broadcast start here immediately. 
-            // We wait for the "mame_start = romname" message to arrive.
-
             char buffer[4096];
             std::string netBuffer = ""; // Persistent buffer for fragmented packets
             int n;
             
             while ((n = recv(sock, buffer, sizeof(buffer), 0)) > 0) {
+                // Append received chunk to our persistent buffer
                 netBuffer.append(buffer, n);
                 
+                // Process all complete lines (ending in \n)
                 size_t pos = 0;
                 while ((pos = netBuffer.find('\n')) != std::string::npos) {
                     std::string line = netBuffer.substr(0, pos);
                     ProcessLine(line);
-                    netBuffer.erase(0, pos + 1);
+                    netBuffer.erase(0, pos + 1); // Remove processed line
                 }
             }
             Log("[NET] Disconnected from MAME.");
