@@ -2,7 +2,7 @@
 // copyright-holders: Jacob Simpson
 
 // MAME Bridge NetToWin
-// Version 3.0.0 (Protocol Fix)
+// Version 3.1.0
 // Author: DJ GLiTCH
 // Designed to bridge the gap between network and windows output in MAME.
 
@@ -43,7 +43,7 @@
 #define ID_TRAY_GITHUB   1005
 
 #define TOOL_NAME "MAME Bridge NetToWin"
-#define TOOL_VERSION "3.0.0"
+#define TOOL_VERSION "3.1.0"
 #define TOOL_AUTHOR "DJ GLiTCH"
 #define GITHUB_LINK "https://github.com/djGLiTCH/MAME-Bridge-NetToWin"
 
@@ -95,7 +95,6 @@ LPARAM GetIDForName(const std::string& name) {
         g_nameToID[name] = newID;
         g_idToName[newID] = name;
         
-        // Prevent spamming logs for standard inputs
         if (newID < 1000) { 
             std::stringstream ss;
             ss << "[MAP] New Output: '" << name << "' -> ID " << newID;
@@ -112,9 +111,8 @@ LRESULT CALLBACK BridgeWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam
         HWND client = (HWND)wParam;
         g_clients.push_back(client);
         Log("[WIN] Client Registered!");
-        
-        // Sync new clients immediately
-        PostMessage(client, om_mame_start, (WPARAM)g_hwndBridge, 0);
+        // FIX: REMOVED PostMessage(om_mame_start) to prevent infinite loop.
+        // Client already knows we exist.
         return 1;
     }
     else if (msg == om_mame_unregister_client) {
@@ -215,7 +213,7 @@ LRESULT CALLBACK GUIWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 }
 
 // --- NETWORK PARSER ---
-// Helper: Remove everything except A-Z, 0-9, and underscore
+// Helper: Remove everything except A-Z, 0-9, dot, and underscore
 std::string CleanString(std::string input) {
     std::string output = "";
     for (char c : input) {
@@ -227,6 +225,11 @@ std::string CleanString(std::string input) {
 }
 
 void ProcessLine(std::string line) {
+    // 0. DEBUG: Log Raw line to confirm reception
+    // if (line.length() > 0) Log("RAW: " + line);
+
+    // 1. Basic Trim
+    if (!line.empty() && line.back() == '\r') line.pop_back();
     if (line.empty()) return;
 
     size_t eqPos = line.find("=");
@@ -234,11 +237,11 @@ void ProcessLine(std::string line) {
         std::string rawName = line.substr(0, eqPos);
         std::string rawVal = line.substr(eqPos + 1);
 
-        // CLEANING
+        // 2. CLEANING
         std::string name = CleanString(rawName);
         std::string valStr = CleanString(rawVal);
         
-        // LOGIC
+        // 3. LOGIC
         if (name == "mame_start") {
             g_currentRomName = valStr;
             g_idToName[0] = g_currentRomName;
@@ -284,8 +287,7 @@ void NetworkThread() {
                 netBuffer.append(buffer, n);
                 size_t pos = 0;
                 
-                // CRITICAL FIX: Look for '\r' (Carriage Return) NOT '\n'
-                // MAME uses "name = val\r", so we must split on \r.
+                // CRITICAL FIX: Split on '\r' (Carriage Return)
                 while ((pos = netBuffer.find('\r')) != std::string::npos) {
                     std::string line = netBuffer.substr(0, pos);
                     ProcessLine(line);
