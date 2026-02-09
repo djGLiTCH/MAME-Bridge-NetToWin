@@ -1,4 +1,5 @@
 **MAME Bridge NetToWin**
+
 Created by DJ GLiTCH
 
 This tool is designed to enable "output windows" as an additional add-on tool when you have "output network" set in MAME, as natively you can only choose "windows" or "network" in MAME settings (mame.ini).
