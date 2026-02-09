@@ -2,7 +2,7 @@
 // copyright-holders: Jacob Simpson
 
 // MAME Bridge NetToWin
-// Version 2.6.0
+// Version 2.7.0
 // Author: DJ GLiTCH
 // Designed to bridge the gap between network and windows output in MAME.
 
@@ -41,7 +41,7 @@
 #define ID_TRAY_GITHUB   1005
 
 #define TOOL_NAME "MAME Bridge NetToWin"
-#define TOOL_VERSION "2.6.0"
+#define TOOL_VERSION "2.7.0"
 #define TOOL_AUTHOR "DJ GLiTCH"
 #define GITHUB_LINK "https://github.com/djGLiTCH/MAME-Bridge-NetToWin"
 
@@ -57,7 +57,7 @@ std::vector<HWND> g_clients;
 std::map<std::string, LPARAM> g_nameToID;
 std::map<LPARAM, std::string> g_idToName;
 LPARAM g_nextID = 1;
-std::string g_currentRomName = "___empty"; // Default to empty
+std::string g_currentRomName = "___empty"; 
 
 // MESSAGES
 UINT om_mame_start;
@@ -109,7 +109,8 @@ LRESULT CALLBACK BridgeWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam
         HWND client = (HWND)wParam;
         g_clients.push_back(client);
         Log("[WIN] Client Registered!");
-        PostMessage(client, om_mame_start, (WPARAM)g_hwndBridge, 0);
+        // FIX: Removed PostMessage(om_mame_start) here to prevent infinite loop.
+        // The client already knows we exist, so we just accept the registration silently.
         return 1;
     }
     else if (msg == om_mame_unregister_client) {
