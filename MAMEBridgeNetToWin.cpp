@@ -2,7 +2,7 @@
 // copyright-holders: Jacob Simpson
 
 // MAME Bridge NetToWin
-// Version 2.1.0
+// Version 2.2.0
 // Author: DJ GLiTCH
 // Designed to bridge the gap between network and windows output in MAME and enable simultaneous output.
 // MAME must be set to "output network". This tool will forward all state outputs from "network" to "windows" by simulating native "windows" output in MAME.
@@ -40,11 +40,11 @@
 #define ID_TRAY_EXIT     1002
 #define ID_TRAY_SHOW     1003
 #define ID_TRAY_ABOUT    1004
-#define ID_TRAY_GITHUB   1005  // New ID for GitHub Menu
+#define ID_TRAY_GITHUB   1005
 
 // --- INFO STRINGS ---
 #define TOOL_NAME "MAME Bridge NetToWin"
-#define TOOL_VERSION "2.1.0"
+#define TOOL_VERSION "2.2.0"
 #define TOOL_AUTHOR "DJ GLiTCH"
 #define GITHUB_LINK "https://github.com/djGLiTCH/MAME-Bridge-NetToWin"
 
@@ -60,6 +60,7 @@ std::vector<HWND> g_clients;
 std::map<std::string, LPARAM> g_nameToID;
 std::map<LPARAM, std::string> g_idToName;
 LPARAM g_nextID = 1;
+std::string g_currentRomName = "MAME"; // Default to MAME until we get the start signal
 
 // WINDOWS MESSAGE IDs
 UINT om_mame_start;
@@ -112,6 +113,9 @@ LRESULT CALLBACK BridgeWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam
         HWND client = (HWND)wParam;
         g_clients.push_back(client);
         Log("[WIN] Client Registered!");
+        
+        // Handshake: Client sends us their ID, we acknowledge by sending all current states (if we had them)
+        // For now, simply accepting the registration is enough.
         return 1;
     }
     else if (msg == om_mame_unregister_client) {
@@ -127,10 +131,20 @@ LRESULT CALLBACK BridgeWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam
     }
     else if (msg == om_mame_get_id_string) {
         LPARAM id = (LPARAM)wParam;
-        std::string name = (id == 0) ? "MAME" : (g_idToName.count(id) ? g_idToName[id] : "");
+        std::string name = "";
 
+        // ID 0 is ALWAYS the ROM Name / System Name
+        if (id == 0) {
+            name = g_currentRomName;
+        } 
+        else if (g_idToName.count(id)) {
+            name = g_idToName[id];
+        }
+
+        // Prepare the COPYDATA struct exactly as MAME does
         struct copydata_id_string { uint32_t id; char string[1]; };
         int dataLen = sizeof(copydata_id_string) + name.length() + 1;
+        
         std::vector<uint8_t> buffer(dataLen);
         copydata_id_string* pData = (copydata_id_string*)buffer.data();
         pData->id = (uint32_t)id;
@@ -152,7 +166,6 @@ LRESULT CALLBACK GUIWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             0, 0, 0, 0, hwnd, NULL, GetModuleHandle(NULL), NULL);
         SendMessage(g_hLogCtrl, WM_SETFONT, (WPARAM)GetStockObject(ANSI_FIXED_FONT), 0);
         
-        // Log Initial Version Info
         Log(std::string(TOOL_NAME) + " - Version " + std::string(TOOL_VERSION));
         break;
 
@@ -177,23 +190,15 @@ LRESULT CALLBACK GUIWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             HMENU hMenu = CreatePopupMenu();
             AppendMenu(hMenu, MF_STRING, ID_TRAY_SHOW, "Show Logs");
             AppendMenu(hMenu, MF_STRING, ID_TRAY_ABOUT, "About");
-            AppendMenu(hMenu, MF_STRING, ID_TRAY_GITHUB, "GitHub"); // New Menu Item
+            AppendMenu(hMenu, MF_STRING, ID_TRAY_GITHUB, "GitHub");
             AppendMenu(hMenu, MF_SEPARATOR, 0, NULL);
             AppendMenu(hMenu, MF_STRING, ID_TRAY_EXIT, "Exit");
             SetForegroundWindow(hwnd);
             int cmd = TrackPopupMenu(hMenu, TPM_RETURNCMD | TPM_NONOTIFY, pt.x, pt.y, 0, hwnd, NULL);
             
             if (cmd == ID_TRAY_EXIT) DestroyWindow(hwnd);
-            
-            if (cmd == ID_TRAY_SHOW) {
-                ShowWindow(hwnd, SW_SHOW);
-                ShowWindow(hwnd, SW_RESTORE);
-            }
-
-            if (cmd == ID_TRAY_GITHUB) {
-                // Open default web browser
-                ShellExecute(0, 0, GITHUB_LINK, 0, 0, SW_SHOW);
-            }
+            if (cmd == ID_TRAY_SHOW) { ShowWindow(hwnd, SW_SHOW); ShowWindow(hwnd, SW_RESTORE); }
+            if (cmd == ID_TRAY_GITHUB) ShellExecute(0, 0, GITHUB_LINK, 0, 0, SW_SHOW);
             
             if (cmd == ID_TRAY_ABOUT) {
                 std::string desc = LoadDescriptionFromResource();
@@ -204,7 +209,6 @@ LRESULT CALLBACK GUIWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                                        "GitHub: " + std::string(GITHUB_LINK);
                 MessageBox(hwnd, aboutMsg.c_str(), "About", MB_ICONINFORMATION | MB_OK);
             }
-            
             DestroyMenu(hMenu);
         }
         else if (lParam == WM_LBUTTONDBLCLK) {
@@ -236,6 +240,45 @@ LRESULT CALLBACK GUIWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     return 0;
 }
 
+// --- PROCESS NETWORK LINE ---
+void ProcessLine(std::string line) {
+    // Trim whitespace
+    while (!line.empty() && (line.back() == '\r' || line.back() == '\n' || line.back() == ' ')) 
+        line.pop_back();
+
+    if (line.empty()) return;
+
+    size_t eqPos = line.find("=");
+    if (eqPos != std::string::npos) {
+        std::string name = line.substr(0, eqPos);
+        // Trim trailing space from name
+        while (!name.empty() && name.back() == ' ') name.pop_back();
+        
+        std::string valStr = line.substr(eqPos + 1);
+        // Trim leading space from value
+        while (!valStr.empty() && valStr.front() == ' ') valStr.erase(0, 1);
+        
+        // SPECIAL CASE: "mame_start"
+        // This tells us the ROM NAME. We must store this for ID 0.
+        if (name == "mame_start") {
+            g_currentRomName = valStr;
+            Log("[SYS] MAME Started. ROM: " + g_currentRomName);
+            
+            // Broadcast START to Windows Clients (LEDBlinky)
+            PostMessage(HWND_BROADCAST, om_mame_start, (WPARAM)g_hwndBridge, 0);
+            return;
+        }
+
+        // STANDARD OUTPUT
+        int val = std::atoi(valStr.c_str());
+        LPARAM id = GetIDForName(name);
+        
+        for (HWND client : g_clients) {
+            PostMessage(client, om_mame_update_state, (WPARAM)id, (LPARAM)val);
+        }
+    }
+}
+
 // --- NETWORK THREAD ---
 void NetworkThread() {
     Log("[SYS] Network Thread Started. Waiting for MAME...");
@@ -249,29 +292,35 @@ void NetworkThread() {
 
         if (connect(sock, (struct sockaddr*)&server, sizeof(server)) == 0) {
             Log("[NET] Connected to MAME!");
-            PostMessage(HWND_BROADCAST, om_mame_start, (WPARAM)g_hwndBridge, 0);
+            
+            // NOTE: We do NOT broadcast start here immediately. 
+            // We wait for the "mame_start = romname" message to arrive.
 
             char buffer[4096];
+            std::string netBuffer = ""; // Persistent buffer for fragmented packets
             int n;
-            while ((n = recv(sock, buffer, sizeof(buffer) - 1, 0)) > 0) {
-                buffer[n] = '\0';
-                char* line = strtok(buffer, "\r\n");
-                while (line) {
-                    std::string msg = line;
-                    size_t eq = msg.find("=");
-                    if (eq != std::string::npos) {
-                        std::string name = msg.substr(0, eq);
-                        while (!name.empty() && name.back() == ' ') name.pop_back();
-                        int val = std::atoi(msg.substr(eq + 1).c_str());
-
-                        LPARAM id = GetIDForName(name);
-                        for (HWND client : g_clients)
-                            PostMessage(client, om_mame_update_state, (WPARAM)id, (LPARAM)val);
-                    }
-                    line = strtok(NULL, "\r\n");
+            
+            while ((n = recv(sock, buffer, sizeof(buffer), 0)) > 0) {
+                netBuffer.append(buffer, n);
+                
+                size_t pos = 0;
+                while ((pos = netBuffer.find('\n')) != std::string::npos) {
+                    std::string line = netBuffer.substr(0, pos);
+                    ProcessLine(line);
+                    netBuffer.erase(0, pos + 1);
                 }
             }
             Log("[NET] Disconnected from MAME.");
+            
+            // Broadcast STOP to Windows Clients
+            PostMessage(HWND_BROADCAST, om_mame_stop, (WPARAM)g_hwndBridge, 0);
+            
+            // Reset state
+            g_currentRomName = "MAME";
+            g_nameToID.clear();
+            g_idToName.clear();
+            g_nextID = 1;
+
         } else {
             Sleep(2000);
         }
@@ -294,7 +343,6 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrev, LPSTR lpCmdLine, int nC
     wcG.lpszClassName = GUI_WINDOW_CLASS;
     wcG.lpfnWndProc = GUIWndProc;
     wcG.hInstance = hInstance;
-    // LOAD ICON FROM RESOURCE
     wcG.hIcon = LoadIcon(hInstance, "EXE_ICON");
     wcG.hbrBackground = (HBRUSH)(COLOR_WINDOW + 1);
     RegisterClass(&wcG);
