@@ -2,7 +2,7 @@
 // copyright-holders: Jacob Simpson
 
 // MAME Bridge NetToWin
-// Version 2.3.0
+// Version 2.4.0 (Single Instance & Clean Stop)
 // Author: DJ GLiTCH
 // Designed to bridge the gap between network and windows output in MAME and enable simultaneous output.
 // MAME must be set to "output network". This tool will forward all state outputs from "network" to "windows" by simulating native "windows" output in MAME.
@@ -44,7 +44,7 @@
 
 // --- INFO STRINGS ---
 #define TOOL_NAME "MAME Bridge NetToWin"
-#define TOOL_VERSION "2.3.0"
+#define TOOL_VERSION "2.4.0"
 #define TOOL_AUTHOR "DJ GLiTCH"
 #define GITHUB_LINK "https://github.com/djGLiTCH/MAME-Bridge-NetToWin"
 
@@ -138,7 +138,6 @@ LRESULT CALLBACK BridgeWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam
             name = g_idToName[id];
         }
 
-        // Prepare COPYDATA
         struct copydata_id_string { uint32_t id; char string[1]; };
         int dataLen = sizeof(copydata_id_string) + name.length() + 1;
         
@@ -237,30 +236,24 @@ LRESULT CALLBACK GUIWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     return 0;
 }
 
-// --- LINE PROCESSOR ---
+// --- PROCESS NETWORK LINE ---
 void ProcessLine(std::string line) {
-    // 1. Trim potential Windows CRLF (\r)
     if (!line.empty() && line.back() == '\r') line.pop_back();
     if (line.empty()) return;
 
-    // 2. Parse "Key = Value"
     size_t eqPos = line.find("=");
     if (eqPos != std::string::npos) {
         std::string name = line.substr(0, eqPos);
-        // Trim trailing space from name
         while (!name.empty() && name.back() == ' ') name.pop_back();
         
         std::string valStr = line.substr(eqPos + 1);
-        // Trim leading space from value
         while (!valStr.empty() && valStr.front() == ' ') valStr.erase(0, 1);
         
-        // SPECIAL CASE: "mame_start"
-        // This MUST be caught to set the ROM Name for ID 0
+        // SPECIAL CASE: "mame_start" (Sets ROM Name for ID 0)
         if (name == "mame_start") {
             g_currentRomName = valStr;
             Log("[SYS] MAME Started. ROM: " + g_currentRomName);
-            
-            // Broadcast START to Windows Clients (LEDBlinky)
+            // Broadcast START again now that we have the real name
             PostMessage(HWND_BROADCAST, om_mame_start, (WPARAM)g_hwndBridge, 0);
             return;
         }
@@ -288,29 +281,33 @@ void NetworkThread() {
 
         if (connect(sock, (struct sockaddr*)&server, sizeof(server)) == 0) {
             Log("[NET] Connected to MAME!");
-            
+
+            // 1. Force Wake-up (Send newline to MAME)
+            const char* wakeUp = "\r\n";
+            send(sock, wakeUp, 2, 0);
+
+            // 2. Force Windows Start (Start Aggressively)
+            PostMessage(HWND_BROADCAST, om_mame_start, (WPARAM)g_hwndBridge, 0);
+
             char buffer[4096];
-            std::string netBuffer = ""; // Persistent buffer for fragmented packets
+            std::string netBuffer = ""; // Persistent buffer
             int n;
             
             while ((n = recv(sock, buffer, sizeof(buffer), 0)) > 0) {
-                // Append received chunk to our persistent buffer
                 netBuffer.append(buffer, n);
-                
-                // Process all complete lines (ending in \n)
                 size_t pos = 0;
                 while ((pos = netBuffer.find('\n')) != std::string::npos) {
                     std::string line = netBuffer.substr(0, pos);
                     ProcessLine(line);
-                    netBuffer.erase(0, pos + 1); // Remove processed line
+                    netBuffer.erase(0, pos + 1);
                 }
             }
             Log("[NET] Disconnected from MAME.");
             
-            // Broadcast STOP to Windows Clients
+            // CLEAN SHUTDOWN: Broadcast STOP and clear ID maps
             PostMessage(HWND_BROADCAST, om_mame_stop, (WPARAM)g_hwndBridge, 0);
+            Log("[SYS] Cleared ID Maps & Sent STOP Signal.");
             
-            // Reset state
             g_currentRomName = "MAME";
             g_nameToID.clear();
             g_idToName.clear();
@@ -326,6 +323,14 @@ void NetworkThread() {
 
 // --- MAIN ENTRY POINT ---
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrev, LPSTR lpCmdLine, int nCmdShow) {
+    // 0. SINGLE INSTANCE CHECK
+    // We create a named mutex. If it already exists, another copy is running.
+    HANDLE hMutex = CreateMutex(NULL, TRUE, "Global\\MAMEBridgeNetToWin_Mutex");
+    if (GetLastError() == ERROR_ALREADY_EXISTS) {
+        MessageBox(NULL, "MAME Bridge NetToWin is already running.", "Error", MB_OK | MB_ICONERROR);
+        return 1; // Exit immediately
+    }
+
     // 1. Register Bridge Class
     WNDCLASS wcB = { 0 };
     wcB.lpszClassName = BRIDGE_WINDOW_CLASS;
@@ -375,5 +380,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrev, LPSTR lpCmdLine, int nC
         TranslateMessage(&msg);
         DispatchMessage(&msg);
     }
+    
+    // Release Mutex on exit (OS does this automatically, but good practice)
+    ReleaseMutex(hMutex);
+    CloseHandle(hMutex);
     return 0;
 }
