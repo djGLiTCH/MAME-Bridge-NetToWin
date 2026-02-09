@@ -13,3 +13,5 @@ I have previously proven that simultaneous dual output is possible natively in M
 
 The original source code and latest release / version can be found at:
 https://github.com/djGLiTCH/MAME-Bridge-NetToWin
+
+NOTE: I would recommend using this tool with Hook Of The Reaper over MameHooker, as that is what I have tested with. Hook Of The Reaper (https://github.com/6Bolt/Hook-Of-The-Reaper) uses "network" output, which is why LEDBlinky can access the "windows" output created by this tool.
