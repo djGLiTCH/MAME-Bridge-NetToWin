@@ -1,0 +1,3 @@
+// bridge.rc
+// Reference for identifying icon image during build process and assigning icon to EXE file
+EXE_ICON ICON "icon.ico"
