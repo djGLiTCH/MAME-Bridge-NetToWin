@@ -3,6 +3,7 @@
 
 // MAME Bridge NetToWin
 // Version 2.0.0
+// https://github.com/djGLiTCH/MAME-Bridge-NetToWin
 // Designed to bridge the gap between network and windows output in MAME and enable simultaneous output.
 // MAME must be set to "output network". This tool will forward all state outputs from "network" to "windows" by simulating native "windows" output in MAME.
 // Only compatible with MAME 64-bit builds running on Windows
