@@ -2,15 +2,15 @@
 // copyright-holders: Jacob Simpson
 
 // MAME Bridge NetToWin
-// Version 2.0.0
-// https://github.com/djGLiTCH/MAME-Bridge-NetToWin
+// Version 2.1.0
+// Author: DJ GLiTCH
 // Designed to bridge the gap between network and windows output in MAME and enable simultaneous output.
 // MAME must be set to "output network". This tool will forward all state outputs from "network" to "windows" by simulating native "windows" output in MAME.
-// Only compatible with MAME 64-bit builds running on Windows
+// Only compatible with MAME 64-bit builds running on Windows 64-bit.
 
 // Compile with MSYS2 MINGW64:
-// Step 1 (compile the icon resource):  windres bridge.rc -o bridge.o
-// Step 2 (compile the application):    g++ MAMEBridgeNetToWin.cpp bridge.o -o MAME-Bridge-NetToWin.exe -lws2_32 -mwindows -static
+// Step 1 (compile resources):  windres bridge.rc -o bridge.o
+// Step 2 (compile application): g++ MAMEBridgeNetToWin.cpp bridge.o -o MAME-Bridge-NetToWin.exe -lws2_32 -mwindows -static
 
 #define _WIN32_WINNT 0x0600
 #include <winsock2.h>
@@ -39,6 +39,14 @@
 #define ID_TRAY_APP_ICON 1001
 #define ID_TRAY_EXIT     1002
 #define ID_TRAY_SHOW     1003
+#define ID_TRAY_ABOUT    1004
+#define ID_TRAY_GITHUB   1005  // New ID for GitHub Menu
+
+// --- INFO STRINGS ---
+#define TOOL_NAME "MAME Bridge NetToWin"
+#define TOOL_VERSION "2.1.0"
+#define TOOL_AUTHOR "DJ GLiTCH"
+#define GITHUB_LINK "https://github.com/djGLiTCH/MAME-Bridge-NetToWin"
 
 // --- GLOBALS ---
 HWND g_hwndGUI = NULL;      // Visible Log Window
@@ -60,6 +68,20 @@ UINT om_mame_update_state;
 UINT om_mame_register_client;
 UINT om_mame_unregister_client;
 UINT om_mame_get_id_string;
+
+// --- RESOURCE HELPER ---
+std::string LoadDescriptionFromResource() {
+    HRSRC hRes = FindResource(NULL, "DESCRIPTION_TEXT", RT_RCDATA);
+    if (!hRes) return "Error: Description resource not found in executable.";
+
+    HGLOBAL hData = LoadResource(NULL, hRes);
+    if (!hData) return "Error: Could not load description resource.";
+
+    const char* data = (const char*)LockResource(hData);
+    DWORD size = SizeofResource(NULL, hRes);
+
+    return std::string(data, size);
+}
 
 // --- LOGGING HELPER ---
 void Log(const std::string& msg) {
@@ -129,6 +151,9 @@ LRESULT CALLBACK GUIWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             WS_CHILD | WS_VISIBLE | WS_VSCROLL | ES_MULTILINE | ES_AUTOVSCROLL | ES_READONLY, 
             0, 0, 0, 0, hwnd, NULL, GetModuleHandle(NULL), NULL);
         SendMessage(g_hLogCtrl, WM_SETFONT, (WPARAM)GetStockObject(ANSI_FIXED_FONT), 0);
+        
+        // Log Initial Version Info
+        Log(std::string(TOOL_NAME) + " - Version " + std::string(TOOL_VERSION));
         break;
 
     case WM_SIZE:
@@ -151,15 +176,35 @@ LRESULT CALLBACK GUIWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             GetCursorPos(&pt);
             HMENU hMenu = CreatePopupMenu();
             AppendMenu(hMenu, MF_STRING, ID_TRAY_SHOW, "Show Logs");
+            AppendMenu(hMenu, MF_STRING, ID_TRAY_ABOUT, "About");
+            AppendMenu(hMenu, MF_STRING, ID_TRAY_GITHUB, "GitHub"); // New Menu Item
             AppendMenu(hMenu, MF_SEPARATOR, 0, NULL);
             AppendMenu(hMenu, MF_STRING, ID_TRAY_EXIT, "Exit");
             SetForegroundWindow(hwnd);
             int cmd = TrackPopupMenu(hMenu, TPM_RETURNCMD | TPM_NONOTIFY, pt.x, pt.y, 0, hwnd, NULL);
+            
             if (cmd == ID_TRAY_EXIT) DestroyWindow(hwnd);
+            
             if (cmd == ID_TRAY_SHOW) {
                 ShowWindow(hwnd, SW_SHOW);
                 ShowWindow(hwnd, SW_RESTORE);
             }
+
+            if (cmd == ID_TRAY_GITHUB) {
+                // Open default web browser
+                ShellExecute(0, 0, GITHUB_LINK, 0, 0, SW_SHOW);
+            }
+            
+            if (cmd == ID_TRAY_ABOUT) {
+                std::string desc = LoadDescriptionFromResource();
+                std::string aboutMsg = std::string(TOOL_NAME) + "\n" +
+                                       "Version: " + std::string(TOOL_VERSION) + "\n" +
+                                       "Author: " + std::string(TOOL_AUTHOR) + "\n\n" +
+                                       desc + "\n\n" +
+                                       "GitHub: " + std::string(GITHUB_LINK);
+                MessageBox(hwnd, aboutMsg.c_str(), "About", MB_ICONINFORMATION | MB_OK);
+            }
+            
             DestroyMenu(hMenu);
         }
         else if (lParam == WM_LBUTTONDBLCLK) {
@@ -256,7 +301,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrev, LPSTR lpCmdLine, int nC
 
     // 3. Create Windows
     g_hwndBridge = CreateWindow(BRIDGE_WINDOW_CLASS, "Bridge", 0, 0, 0, 0, 0, HWND_MESSAGE, NULL, hInstance, NULL);
-    g_hwndGUI = CreateWindow(GUI_WINDOW_CLASS, "NetToWin Bridge Logs", WS_OVERLAPPEDWINDOW, 
+    g_hwndGUI = CreateWindow(GUI_WINDOW_CLASS, TOOL_NAME, WS_OVERLAPPEDWINDOW, 
         CW_USEDEFAULT, CW_USEDEFAULT, 600, 400, NULL, NULL, hInstance, NULL);
 
     // 4. Setup Tray Icon
@@ -266,7 +311,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrev, LPSTR lpCmdLine, int nC
     g_nid.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP;
     g_nid.uCallbackMessage = WM_SHELLNOTIFY;
     g_nid.hIcon = wcG.hIcon;
-    strcpy(g_nid.szTip, "NetToWin Bridge");
+    strcpy(g_nid.szTip, TOOL_NAME);
     Shell_NotifyIcon(NIM_ADD, &g_nid);
 
     // 5. Register MAME Messages
