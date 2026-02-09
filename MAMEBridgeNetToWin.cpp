@@ -3,12 +3,13 @@
 
 // MAME Bridge NetToWin
 // Version 2.0.0
-// Designed to bridge the gap between network and windows output in MAME and enable simultaneous output
-// MAME must be set to "output network" and this tool will forward all state outputs from "network" to "windows" by simulating native "windows" output in MAME
+// Designed to bridge the gap between network and windows output in MAME and enable simultaneous output.
+// MAME must be set to "output network". This tool will forward all state outputs from "network" to "windows" by simulating native "windows" output in MAME.
+// Only compatible with MAME 64-bit builds running on Windows
 
-// Compile with:
-// windres bridge.rc -o bridge.o
-// g++ MAMEBridgeNetToWin.cpp bridge.o -o MAME-Bridge-NetToWin.exe -lws2_32 -mwindows -static
+// Compile with MSYS2 MINGW64:
+// Step 1: windres bridge.rc -o bridge.o
+// Step 2: g++ MAMEBridgeNetToWin.cpp bridge.o -o MAME-Bridge-NetToWin.exe -lws2_32 -mwindows -static
 
 #define _WIN32_WINNT 0x0600
 #include <winsock2.h>
