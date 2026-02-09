@@ -2,7 +2,7 @@
 // copyright-holders: Jacob Simpson
 
 // MAME Bridge NetToWin
-// Version 2.7.0
+// Version 3.0.0 (Protocol Fix)
 // Author: DJ GLiTCH
 // Designed to bridge the gap between network and windows output in MAME.
 
@@ -23,6 +23,8 @@
 #include <atomic>
 #include <sstream>
 #include <iomanip>
+#include <algorithm>
+#include <cctype>
 
 #pragma comment(lib, "ws2_32.lib")
 #pragma comment(lib, "comctl32.lib")
@@ -41,7 +43,7 @@
 #define ID_TRAY_GITHUB   1005
 
 #define TOOL_NAME "MAME Bridge NetToWin"
-#define TOOL_VERSION "2.7.0"
+#define TOOL_VERSION "3.0.0"
 #define TOOL_AUTHOR "DJ GLiTCH"
 #define GITHUB_LINK "https://github.com/djGLiTCH/MAME-Bridge-NetToWin"
 
@@ -93,6 +95,7 @@ LPARAM GetIDForName(const std::string& name) {
         g_nameToID[name] = newID;
         g_idToName[newID] = name;
         
+        // Prevent spamming logs for standard inputs
         if (newID < 1000) { 
             std::stringstream ss;
             ss << "[MAP] New Output: '" << name << "' -> ID " << newID;
@@ -109,8 +112,9 @@ LRESULT CALLBACK BridgeWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam
         HWND client = (HWND)wParam;
         g_clients.push_back(client);
         Log("[WIN] Client Registered!");
-        // FIX: Removed PostMessage(om_mame_start) here to prevent infinite loop.
-        // The client already knows we exist, so we just accept the registration silently.
+        
+        // Sync new clients immediately
+        PostMessage(client, om_mame_start, (WPARAM)g_hwndBridge, 0);
         return 1;
     }
     else if (msg == om_mame_unregister_client) {
@@ -128,7 +132,6 @@ LRESULT CALLBACK BridgeWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam
         LPARAM id = (LPARAM)wParam;
         std::string name = "";
 
-        // ID 0 is System Name
         if (id == 0) name = g_currentRomName;
         else if (g_idToName.count(id)) name = g_idToName[id];
 
@@ -212,24 +215,34 @@ LRESULT CALLBACK GUIWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 }
 
 // --- NETWORK PARSER ---
+// Helper: Remove everything except A-Z, 0-9, and underscore
+std::string CleanString(std::string input) {
+    std::string output = "";
+    for (char c : input) {
+        if (isalnum(c) || c == '_' || c == '.') {
+            output += c;
+        }
+    }
+    return output;
+}
+
 void ProcessLine(std::string line) {
-    if (!line.empty() && line.back() == '\r') line.pop_back();
     if (line.empty()) return;
 
     size_t eqPos = line.find("=");
     if (eqPos != std::string::npos) {
-        std::string name = line.substr(0, eqPos);
-        while (!name.empty() && name.back() == ' ') name.pop_back();
-        std::string valStr = line.substr(eqPos + 1);
-        while (!valStr.empty() && valStr.front() == ' ') valStr.erase(0, 1);
+        std::string rawName = line.substr(0, eqPos);
+        std::string rawVal = line.substr(eqPos + 1);
+
+        // CLEANING
+        std::string name = CleanString(rawName);
+        std::string valStr = CleanString(rawVal);
         
-        // CAPTURE MAME START
+        // LOGIC
         if (name == "mame_start") {
             g_currentRomName = valStr;
-            // Update ID 0 mapping
             g_idToName[0] = g_currentRomName;
             Log("[SYS] MAME Started. ROM: " + g_currentRomName);
-            // Broadcast START again now that we have the real name
             PostMessage(HWND_BROADCAST, om_mame_start, (WPARAM)g_hwndBridge, 0);
             return;
         }
@@ -254,15 +267,12 @@ void NetworkThread() {
         if (connect(sock, (struct sockaddr*)&server, sizeof(server)) == 0) {
             Log("[NET] Connected to MAME!");
 
-            // 1. INITIALIZE DEFAULTS
-            g_currentRomName = "___empty"; // Use placeholder initially
-            g_idToName[0] = "___empty";    // Ensure ID 0 map matches
+            g_currentRomName = "___empty"; 
+            g_idToName[0] = "___empty";    
 
-            // 2. FORCE START BROADCAST
             PostMessage(HWND_BROADCAST, om_mame_start, (WPARAM)g_hwndBridge, 0);
             Log("[SYS] Sent Force Start Signal (___empty).");
 
-            // 3. SEND HANDSHAKE
             const char* wakeUp = "\r\n";
             send(sock, wakeUp, 2, 0);
 
@@ -273,7 +283,10 @@ void NetworkThread() {
             while ((n = recv(sock, buffer, sizeof(buffer), 0)) > 0) {
                 netBuffer.append(buffer, n);
                 size_t pos = 0;
-                while ((pos = netBuffer.find('\n')) != std::string::npos) {
+                
+                // CRITICAL FIX: Look for '\r' (Carriage Return) NOT '\n'
+                // MAME uses "name = val\r", so we must split on \r.
+                while ((pos = netBuffer.find('\r')) != std::string::npos) {
                     std::string line = netBuffer.substr(0, pos);
                     ProcessLine(line);
                     netBuffer.erase(0, pos + 1);
@@ -282,8 +295,6 @@ void NetworkThread() {
             Log("[NET] Disconnected from MAME.");
             
             PostMessage(HWND_BROADCAST, om_mame_stop, (WPARAM)g_hwndBridge, 0);
-            Log("[SYS] Sent STOP Signal.");
-            
             g_currentRomName = "___empty";
             g_nameToID.clear();
             g_idToName.clear();
