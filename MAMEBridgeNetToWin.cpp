@@ -2,7 +2,7 @@
 // copyright-holders: Jacob Simpson
 
 // MAME Bridge NetToWin
-// Version 3.3.0
+// Version 3.4.0
 // Author: DJ GLiTCH
 // Designed to bridge the gap between network and windows output in MAME.
 
@@ -41,11 +41,14 @@
 #define ID_TRAY_SHOW     1003
 #define ID_TRAY_ABOUT    1004
 #define ID_TRAY_GITHUB   1005
+#define ID_TRAY_AUTOSTART 1006 // New ID for Autostart
 
 #define TOOL_NAME "MAME Bridge NetToWin"
-#define TOOL_VERSION "3.3.0"
+#define TOOL_VERSION "3.4.0"
 #define TOOL_AUTHOR "DJ GLiTCH"
 #define GITHUB_LINK "https://github.com/djGLiTCH/MAME-Bridge-NetToWin"
+#define REG_RUN_PATH "Software\\Microsoft\\Windows\\CurrentVersion\\Run"
+#define REG_APP_NAME "MAMEBridgeNetToWin"
 
 // --- GLOBALS ---
 HWND g_hwndGUI = NULL;
@@ -80,6 +83,34 @@ std::string LoadDescriptionFromResource() {
     return std::string(data, size);
 }
 
+// --- AUTOSTART HELPER ---
+bool IsAutostartEnabled() {
+    HKEY hKey;
+    if (RegOpenKeyEx(HKEY_CURRENT_USER, REG_RUN_PATH, 0, KEY_READ, &hKey) == ERROR_SUCCESS) {
+        char buffer[MAX_PATH];
+        DWORD size = sizeof(buffer);
+        DWORD type = REG_SZ;
+        LONG result = RegQueryValueEx(hKey, REG_APP_NAME, NULL, &type, (LPBYTE)buffer, &size);
+        RegCloseKey(hKey);
+        return (result == ERROR_SUCCESS);
+    }
+    return false;
+}
+
+void ToggleAutostart() {
+    HKEY hKey;
+    if (RegOpenKeyEx(HKEY_CURRENT_USER, REG_RUN_PATH, 0, KEY_SET_VALUE | KEY_QUERY_VALUE, &hKey) == ERROR_SUCCESS) {
+        if (IsAutostartEnabled()) {
+            RegDeleteValue(hKey, REG_APP_NAME);
+        } else {
+            char exePath[MAX_PATH];
+            GetModuleFileName(NULL, exePath, MAX_PATH);
+            RegSetValueEx(hKey, REG_APP_NAME, 0, REG_SZ, (LPBYTE)exePath, strlen(exePath) + 1);
+        }
+        RegCloseKey(hKey);
+    }
+}
+
 // --- LOGGING ---
 void Log(const std::string& msg) {
     if (g_hwndGUI) {
@@ -111,9 +142,6 @@ LRESULT CALLBACK BridgeWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam
         HWND client = (HWND)wParam;
         g_clients.push_back(client);
         Log("[WIN] Client Registered!");
-        
-        // CRITICAL FIX: DO NOT send om_mame_start here.
-        // It causes LEDBlinky to re-register -> Infinite Loop.
         return 1;
     }
     else if (msg == om_mame_unregister_client) {
@@ -128,7 +156,6 @@ LRESULT CALLBACK BridgeWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam
         return 1;
     }
     else if (msg == om_mame_get_id_string) {
-        // ID comes from lParam, NOT wParam
         LPARAM id = (LPARAM)lParam; 
         std::string name = "";
 
@@ -143,7 +170,6 @@ LRESULT CALLBACK BridgeWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam
         strcpy(pData->string, name.c_str());
 
         COPYDATASTRUCT copyData = { 1, (DWORD)dataLen, pData };
-        // Reply to the client (wParam holds the client HWND)
         SendMessage((HWND)wParam, WM_COPYDATA, (WPARAM)g_hwndBridge, (LPARAM)&copyData);
         return 1;
     }
@@ -175,16 +201,26 @@ LRESULT CALLBACK GUIWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
         if (lParam == WM_RBUTTONUP) {
             POINT pt; GetCursorPos(&pt);
             HMENU hMenu = CreatePopupMenu();
+            
+            // Check autostart status
+            UINT flags = MF_STRING;
+            if (IsAutostartEnabled()) flags |= MF_CHECKED;
+            
             AppendMenu(hMenu, MF_STRING, ID_TRAY_SHOW, "Show Logs");
+            AppendMenu(hMenu, flags, ID_TRAY_AUTOSTART, "Autostart"); // Autostart Toggle
             AppendMenu(hMenu, MF_STRING, ID_TRAY_ABOUT, "About");
             AppendMenu(hMenu, MF_STRING, ID_TRAY_GITHUB, "GitHub");
             AppendMenu(hMenu, MF_SEPARATOR, 0, NULL);
             AppendMenu(hMenu, MF_STRING, ID_TRAY_EXIT, "Exit");
+            
             SetForegroundWindow(hwnd);
             int cmd = TrackPopupMenu(hMenu, TPM_RETURNCMD | TPM_NONOTIFY, pt.x, pt.y, 0, hwnd, NULL);
+            
             if (cmd == ID_TRAY_EXIT) DestroyWindow(hwnd);
             if (cmd == ID_TRAY_SHOW) { ShowWindow(hwnd, SW_SHOW); ShowWindow(hwnd, SW_RESTORE); }
             if (cmd == ID_TRAY_GITHUB) ShellExecute(0, 0, GITHUB_LINK, 0, 0, SW_SHOW);
+            if (cmd == ID_TRAY_AUTOSTART) ToggleAutostart(); // Handle Toggle
+            
             if (cmd == ID_TRAY_ABOUT) {
                 std::string desc = LoadDescriptionFromResource();
                 std::string msg = std::string(TOOL_NAME) + "\nVersion: " + std::string(TOOL_VERSION) + 
@@ -216,7 +252,6 @@ LRESULT CALLBACK GUIWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 }
 
 // --- NETWORK PARSER ---
-// Helper: Remove everything except A-Z, 0-9, dot, and underscore
 std::string CleanString(std::string input) {
     std::string output = "";
     for (char c : input) {
