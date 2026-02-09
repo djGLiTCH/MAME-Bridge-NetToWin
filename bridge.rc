@@ -1,3 +1,5 @@
 // bridge.rc
 // Reference for identifying icon image during build process and assigning icon to EXE file
 EXE_ICON ICON "icon.ico"
+// Reference for identifying "About" window text during build process
+DESCRIPTION_TEXT RCDATA "description.txt"
