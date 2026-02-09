@@ -8,8 +8,8 @@
 // Only compatible with MAME 64-bit builds running on Windows
 
 // Compile with MSYS2 MINGW64:
-// Step 1: windres bridge.rc -o bridge.o
-// Step 2: g++ MAMEBridgeNetToWin.cpp bridge.o -o MAME-Bridge-NetToWin.exe -lws2_32 -mwindows -static
+// Step 1 (compile the icon resource):  windres bridge.rc -o bridge.o
+// Step 2 (compile the application):    g++ MAMEBridgeNetToWin.cpp bridge.o -o MAME-Bridge-NetToWin.exe -lws2_32 -mwindows -static
 
 #define _WIN32_WINNT 0x0600
 #include <winsock2.h>
