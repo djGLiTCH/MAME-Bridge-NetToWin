@@ -2,7 +2,7 @@
 // copyright-holders: Jacob Simpson
 
 // MAME Bridge NetToWin
-// Version 3.1.0
+// Version 3.2.0
 // Author: DJ GLiTCH
 // Designed to bridge the gap between network and windows output in MAME.
 
@@ -43,7 +43,7 @@
 #define ID_TRAY_GITHUB   1005
 
 #define TOOL_NAME "MAME Bridge NetToWin"
-#define TOOL_VERSION "3.1.0"
+#define TOOL_VERSION "3.2.0"
 #define TOOL_AUTHOR "DJ GLiTCH"
 #define GITHUB_LINK "https://github.com/djGLiTCH/MAME-Bridge-NetToWin"
 
@@ -111,8 +111,9 @@ LRESULT CALLBACK BridgeWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam
         HWND client = (HWND)wParam;
         g_clients.push_back(client);
         Log("[WIN] Client Registered!");
-        // FIX: REMOVED PostMessage(om_mame_start) to prevent infinite loop.
-        // Client already knows we exist.
+        
+        // Sync new clients immediately
+        PostMessage(client, om_mame_start, (WPARAM)g_hwndBridge, 0);
         return 1;
     }
     else if (msg == om_mame_unregister_client) {
@@ -127,12 +128,14 @@ LRESULT CALLBACK BridgeWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam
         return 1;
     }
     else if (msg == om_mame_get_id_string) {
-        LPARAM id = (LPARAM)wParam;
+        // CRITICAL FIX: ID comes from lParam, NOT wParam
+        LPARAM id = (LPARAM)lParam; 
         std::string name = "";
 
         if (id == 0) name = g_currentRomName;
         else if (g_idToName.count(id)) name = g_idToName[id];
 
+        // MAME COPYDATA Structure
         struct copydata_id_string { uint32_t id; char string[1]; };
         int dataLen = sizeof(copydata_id_string) + name.length() + 1;
         std::vector<uint8_t> buffer(dataLen);
@@ -141,6 +144,7 @@ LRESULT CALLBACK BridgeWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam
         strcpy(pData->string, name.c_str());
 
         COPYDATASTRUCT copyData = { 1, (DWORD)dataLen, pData };
+        // Reply to the client (wParam holds the client HWND)
         SendMessage((HWND)wParam, WM_COPYDATA, (WPARAM)g_hwndBridge, (LPARAM)&copyData);
         return 1;
     }
@@ -225,8 +229,8 @@ std::string CleanString(std::string input) {
 }
 
 void ProcessLine(std::string line) {
-    // 0. DEBUG: Log Raw line to confirm reception
-    // if (line.length() > 0) Log("RAW: " + line);
+    // 0. DEBUG: Log Raw line so you can verify what MAME is sending
+    if (line.length() > 0) Log("RAW: " + line);
 
     // 1. Basic Trim
     if (!line.empty() && line.back() == '\r') line.pop_back();
@@ -287,7 +291,7 @@ void NetworkThread() {
                 netBuffer.append(buffer, n);
                 size_t pos = 0;
                 
-                // CRITICAL FIX: Split on '\r' (Carriage Return)
+                // CRITICAL: Split on '\r' (Carriage Return)
                 while ((pos = netBuffer.find('\r')) != std::string::npos) {
                     std::string line = netBuffer.substr(0, pos);
                     ProcessLine(line);
