@@ -13,6 +13,18 @@ I have previously proven that simultaneous dual output is possible natively in M
 The original source code and latest release / version can be found at:
 https://github.com/djGLiTCH/MAME-Bridge-NetToWin
 
-If you are using LEDBlinky (v8.2.2 or lower), then you will need to ensure all ROMs are loaded with the command "-output network" when launching ROMs with MAME, as LEDBlinky can revert the output setting in mame.ini from "network" to "windows" despite making mame.ini read-only. This may not be an issue in newer version of LEDBlinky if they make use of network output functionality in MAME, but while it relies on windows output this will remain the case.
+**LEDBlinky Specific Notes:**
+https://www.ledblinky.net/
 
-NOTE: I would recommend using this tool with Hook Of The Reaper over MameHooker, as that is what I have tested with. Hook Of The Reaper (https://github.com/6Bolt/Hook-Of-The-Reaper) uses "network" output, which is why LEDBlinky can access the "windows" output created by this tool.
+If you are using LEDBlinky (v8.2.2 or lower), then you will need to ensure all ROMs are loaded with the command "-output network" when launching ROMs with MAME, as LEDBlinky can revert the output setting in mame.ini from "network" to "windows" (even if mame.ini is set to read-only).
+This may not be an issue in newer version of LEDBlinky if they make use of network output functionality in MAME, but while it relies on windows output this will remain the case.
+The steps below will add network output to MAME when launching ROMs through Launchbox. This will override whatever output setting is used in your mame.ini file (which is needed since LEDBlinky can change the mame.ini setting to "output windows", but we need "output network" for HOTR, and MAME Bridge NetToWin will relay the messages from network to windows so LEDBlinky can work as intended in parallel).
+
+1. Open Launchbox
+2. Select Tools > Manage > Emulators
+3. Select MAME (it will highlight once selected), then select "Edit..."
+4. Select Details in the left pane, then in the "Default Command-Line Parameters", you will want to add "-output network" (without quotations), then select "OK"
+5. Close the Emulator window
+6. Restart Launchbox (not needed, but good practice)
+
+NOTE: I would recommend using this tool with Hook Of The Reaper over MameHooker, as that is what I have tested with. Hook Of The Reaper (https://github.com/6Bolt/Hook-Of-The-Reaper) uses "network" output, which is why LEDBlinky can access the "windows" output created by this tool, and both can work together without any communication clashes.
