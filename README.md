@@ -2,6 +2,8 @@
 
 Created by DJ GLiTCH
 
+---
+
 This tool is designed to enable simultaneous output of network and windows in MAME without modifying the core MAME source code.
 
 To achieve this, the MAME Bridge NetToWin tool will handle "output windows" as an additional add-on when you have "output network" set in MAME. The reason this tool exists is because natively you can only choose "windows" or "network" in MAME settings (mame.ini), not both at once.
@@ -16,7 +18,7 @@ MAME Bridge NetToWin (Download Link / GitHub):
 
 https://github.com/djGLiTCH/MAME-Bridge-NetToWin
 
-
+---
 
 LEDBlinky (https://www.ledblinky.net/) Specific Notes:
 
@@ -24,7 +26,7 @@ If you are using LEDBlinky (v8.2.2 or lower), then you will need to ensure all R
 
 This may not be an issue in newer version of LEDBlinky if they make use of network output functionality in MAME, but while it relies on windows output this will remain the case.
 
-
+---
 
 Launchbox Launch Parameter Settings:
 
@@ -37,7 +39,7 @@ The steps below will add network output to MAME when launching ROMs through Laun
 5. Close the Emulator window
 6. Restart Launchbox (not needed, but good practice)
 
-
+---
 
 General Notes:
 
